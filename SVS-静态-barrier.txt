@@ -1,0 +1,177 @@
+#include <iostream>
+#include <fstream>
+#include <vector>
+#include <math.h>
+#include <time.h>
+#include <string>
+#include <string.h>
+#include <sstream>
+#include <algorithm>
+#include <pthread.h>
+#include <semaphore.h>
+#define MAXSIZE 2000
+#define NUM_THREADS 7
+//静态线程+最开始就建立4个线程，每个线程都执行全部的遍历过程
+using namespace std;
+class _index {
+public:
+	int len = 0;
+	vector<unsigned int> arr;
+};
+vector<_index> idx;
+void sorted(int* list, vector<_index>& idx, int num) {
+	for (int i = 0; i < num - 1; i++) {
+		for (int j = 0; j < num - i - 1; j++) {
+			if (idx[list[j]].len > idx[list[j + 1]].len) {
+				int tmp = list[j];
+				list[j] = list[j + 1];
+				list[j + 1] = tmp;
+			}
+		}
+	}
+}
+_index s;
+_index temp;
+pthread_t thread[NUM_THREADS];
+_index* s0 = new _index[NUM_THREADS];
+
+
+//barrier定义
+pthread_barrier_t barrier;
+struct threadParam_t {
+	int t_id;//线程id
+	int* num_of_list;//待测的第几组list
+	int n;
+};
+threadParam_t param[NUM_THREADS];
+void* threadFunc_Level1(void* param) {
+	threadParam_t* p = (threadParam_t*)param;
+	int t_id = p->t_id;
+	int* num_of_list = p->num_of_list;
+	int n = p->n;
+	//初始划分任务s0[t_id]，然后全部遍历完所有List
+	int start = (s.arr.size() / NUM_THREADS) * t_id;
+	int _end;
+	if (t_id == NUM_THREADS - 1) {
+		_end = s.arr.size();
+	}
+	else {
+		_end = start + (s.arr.size()) / NUM_THREADS;
+	}
+	s0[t_id].arr.assign(s.arr.begin() + start, s.arr.begin() + _end);
+	for (int i = 1; i < n; i++) {
+
+		for (int k = 0; k < s0[t_id].arr.size(); k++) {
+			bool isexit = false;
+			for (int jj = 0; jj < idx[num_of_list[i]].arr.size(); jj++) {
+				if (s0[t_id].arr[k] == idx[num_of_list[i]].arr[jj]) {
+					isexit = true;
+					break;
+				}
+			}
+			if (isexit == false) {
+				s0[t_id].arr[k] = -1;
+			}
+		}
+		pthread_barrier_wait(&barrier);
+		vector<unsigned int>::iterator newEnd(remove(s0[t_id].arr.begin(), s0[t_id].arr.end(), -1));
+		s0[t_id].arr.erase(newEnd);
+
+	}
+	pthread_exit(NULL);
+}
+
+_index& SVS(int* list, vector<_index>& idx, int num) {
+	s = idx[list[0]];
+	threadParam_t param[NUM_THREADS];
+	pthread_barrier_init(&barrier,NULL,NUM_THREADS);//初始化barrier
+	for (int t_id = 0; t_id < NUM_THREADS; t_id++) {
+		param[t_id].t_id = t_id;
+		param[t_id].num_of_list = list;
+		param[t_id].n = num;
+		pthread_create(&thread[t_id], NULL, threadFunc_Level1, &param[t_id]);
+	}
+
+	for (int t_id = 0; t_id < NUM_THREADS; t_id++) {
+		pthread_join(thread[t_id], NULL);
+	}
+	s.arr.clear();
+	for (int t_id = 0; t_id < NUM_THREADS; t_id++) {
+		s.arr.insert(s.arr.end(), s0[t_id].arr.begin(), s0[t_id].arr.end());
+	}
+
+	return s;
+}
+int main() {
+	//读取二进制文件
+	fstream file;
+	file.open("ExpIndex", ios::binary | ios::in);
+	if (!file.is_open()) {
+		cout << "No file";
+		return 0;
+
+	}
+
+	for (int i = 0; i < 2000; i++) {
+		_index temp;
+		file.read((char*)&temp.len, sizeof(temp.len));
+		for (int j = 0; j < (temp.len); j++)
+		{
+			unsigned int binary_temp;
+			file.read((char*)&binary_temp, sizeof(binary_temp));
+			temp.arr.push_back(binary_temp);
+		}
+		idx.push_back(temp);
+	}
+	file.close();
+	/*---------------------------------------------------------------------------------------------------------*/
+	file.open("ExpQuery", ios::in);
+	int query[1000][5] = { 0 };
+	string line;
+	int count = 0;
+	while (getline(file, line)) {
+		stringstream ss; //输入流
+		ss << line; //向流中传值
+		int a = 0;
+		while (!ss.eof()) {
+			int temp;
+			ss >> temp;
+			query[count][a] = temp;
+			a++;
+		}
+		count++;
+	}
+	/*-----------------------------------------------------------------------------------------------------------*/
+
+	//SVS
+
+	struct timespec sts, ets;
+	timespec_get(&sts, TIME_UTC);
+	for (int i = 0; i < 5; i++) {
+		int num = 0;
+		for (int j = 0; j < 5; j++) {
+			if (query[i][j] != 0) {
+				num++;
+			}
+		}
+		int* list = new int[num];//例子中的数
+		for (int j = 0; j < num; j++) {
+			list[j] = query[i][j];
+		}
+		//------ - 按表求交-------- -
+		sorted(list, idx, num);
+		SVS(list, idx, num);
+
+	}
+	timespec_get(&ets, TIME_UTC);
+	time_t dsec = ets.tv_sec-sts.tv_sec;
+	long dnsec = ets.tv_nsec-sts.tv_nsec;
+  if(dnsec<0){
+  dsec--;
+  dnsec+=1000000000ll;
+  }
+	printf(" % llu. % 09llus\n", dsec, dnsec);
+
+	return 0;
+}
+
